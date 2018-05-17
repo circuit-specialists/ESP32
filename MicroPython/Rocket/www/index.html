@@ -19,7 +19,7 @@
 </body>
 
 <script>
-    setInterval(newRequest(), 1000);
+    setInterval(newRequest(), 3000);
 
     function newRequest() {
         if (typeof(EventSource) !== 'undefined') {
@@ -27,7 +27,7 @@
             source.onmessage = function(e) {
                 var table_html = "" +
                     "<tr><th> Starting Altitude </th><th> %s ft</th></tr>" +
-                    "<tr><th> Current Altitude </th><th> %s ft</th></tr>" +
+                    "<tr><th> Delta Altitude </th><th> %s ft</th></tr>" +
                     "<tr><th> Max Altitude </th><th> %s ft</th></tr>" +
                     "<tr><th> Current Acceleration </th><th> %s m/s</th></tr>" +
                     "<tr><th> Max Acceleration </th><th> %s m/s</th></tr>" +
@@ -39,12 +39,14 @@
                 var table_data = e.data.split(',');
                 for (var i in table_data) {
                     table_html = table_html.replace("%s", table_data[i]);
-                    table_html = table_html.replace("'", '');
                 }
                 table_html = table_html.replace("[", '');
                 table_html = table_html.replace("]", '');
 
-                document.getElementById("data").innerHTML = table_html;
+                if(table_data[6])
+                    document.getElementById("data").innerHTML = table_html;
+                else
+                document.getElementById("data").innerHTML = table_html + "<tr><th> No GPS Lock </th></tr>";
             };
         }
     }
