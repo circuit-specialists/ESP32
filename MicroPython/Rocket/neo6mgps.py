@@ -1,5 +1,6 @@
 from machine import UART
 from array import *
+import utime
 
 
 class NEO6MGPS(object):
@@ -14,16 +15,9 @@ class NEO6MGPS(object):
         self.setValues()
 
     def read_raw(self):
-        while True:
-            try:
-                self.data = self.uart.read()
-                self.data = self.data.splitlines()
-                self.data.sort()
-                break
-            except:
-                pass
-
-        return self.data
+        self.data = self.uart.read()
+        self.data = self.data.splitlines()
+        self.data.sort()
 
     def setValues(self):
         for i in range(0, len(self.data)):
@@ -39,18 +33,22 @@ class NEO6MGPS(object):
                 self.gprmc = self.data[i]
             elif (self.data[i].find('GPVTG'.encode()) == 1):
                 self.gpvtg = self.data[i]
-            else:
-                self.update()
 
     def interpret_rmc(self):
         if (len(self.gprmc) < 23):
-            self.update()
+            return self.update()
         self.rmc = self.gprmc.split(','.encode())
-        self.utc = float(self.rmc[1])
+        self.utc = str(self.rmc[1])[2:-1]
         self.receiver = str(self.rmc[2])[2:-1]
-        self.latitude = float(self.rmc[3]) / 100
+        try:
+            self.latitude = float(self.rmc[3]) / 100
+        except:
+            self.latitude = str(self.rmc[3])[2:-1]
         self.latitude_direction = str(self.rmc[4])[2:-1]
-        self.longitude = float(self.rmc[5]) / 100
+        try:
+            self.longitude = float(self.rmc[5]) / 100
+        except:
+            self.longitude = str(self.rmc[5])[2:-1]
         self.longitude_direction = str(self.rmc[6])[2:-1]
         self.speed = str(self.rmc[7])[2:-1]
         self.cmg = str(self.rmc[8])[2:-1]
@@ -77,8 +75,10 @@ class NEO6MGPS(object):
                 pass
 
     def getformatedUTC(self, timezone):
-        utc = self.utc
+        utc = float(self.utc)
         self.hours = int(utc / 10000)
+        if(self.hours < 7):
+            self.hours += 24
         self.hours += timezone
         utc %= 10000
         self.minutes = int(utc / 100)

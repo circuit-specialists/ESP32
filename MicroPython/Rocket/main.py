@@ -6,57 +6,75 @@ from microWebSrv import MicroWebSrv
 import os
 import network
 import utime
+import _thread
+import gc
 
 
 def init():
-    global wlan
-    wlan = network.WLAN(network.STA_IF)
+    bme_init()
+    mpu9250_init()
+    gps_init()
+    datavalues_init()
     auto_connect_wifi(SSID='circuitspecialists.com', Password='')
+    if (not wlan.isconnected()):
+        wlan.active(False)
+        global ap
+        ap = network.WLAN(network.AP_IF)
+        ap.active(True)
+        print("AP started: ", ap.ifconfig())
     try:
         rocket_init()
         print("succesful to start")
     except:
-        print("failed to start")
+        print("main init failed to start")
+        utime.sleep(2)
+        machine.reset()
+        
 
 
 def rocket_init():
-    bme_init()
-    mpu9250_init()
     try:
-        gps_init()
+        utime.sleep(5)
+        print("http server starting")
+        _thread.start_new_thread(httpserver_init, ())
     except:
-        print("GPS failed to init, please restart....")
+        print("rocket init failed to start")
+        utime.sleep(2)
+        machine.reset()
+
+
+def rocket_main():
+    while (sensor.acceleration[0] < 1 or sensor.acceleration[1] < 1):
         pass
-    #httpserver_init()
+    while (sensor.acceleration[0] > 1 or sensor.acceleration[1] > 1 or (bme.getAltitude_ft() - data.altitude) > 4):
+            data.launched = True
+            try:
+                data.csv.append(getDataValues())
+            except:
+                pass
+            utime.sleep_ms(2)
 
 
-def datavalues():
-    global altitude
-    altitude = bme.getAltitude_ft()
-    global delta_altitude
-    delta_altitude = 0.0
-    global max_delta_altitude
-    max_delta_altitude = 0.0
-    global acceleration
-    acceleration = 0.0
-    global max_acceleration
-    max_acceleration = 0.0
-    global pressure
-    pressure = 0.0
-    delta_altitude = bme.getAltitude_ft() - altitude
+def getDataValues():
+    data.delta_altitude = bme.getAltitude_ft() - data.altitude
+    data.x_acceleration = sensor.acceleration[0]
+    data.y_acceleration = sensor.acceleration[1]
+    data.pressure = bme.getPressure()
 
-    if (delta_altitude >= max_delta_altitude):
-        max_delta_altitude = delta_altitude
-    if (acceleration >= max_acceleration):
-        max_acceleration = acceleration
+    if (data.delta_altitude >= data.max_delta_altitude):
+        data.max_delta_altitude = data.delta_altitude
+    if (data.x_acceleration >= data.max_x_acceleration):
+        data.max_x_acceleration = data.x_acceleration
+    if (data.y_acceleration >= data.max_y_acceleration):
+        data.max_y_acceleration = data.y_acceleration
 
-    pressure = bme.getPressure()
     gps.update()
     gps.interpret_rmc()
 
     datavalues = [
-        altitude, delta_altitude, max_delta_altitude, acceleration,
-        max_acceleration, pressure, gps.latitude, gps.latitude_direction,
+        data.altitude, data.delta_altitude, data.max_delta_altitude,
+        data.x_acceleration, data.max_x_acceleration, data.y_acceleration,
+        data.max_y_acceleration, data.pressure, gps.latitude, gps.latitude_direction,
         gps.longitude, gps.longitude_direction, gps.speed,
         gps.getformatedUTC(-7)
     ]
@@ -64,15 +82,42 @@ def datavalues():
     return datavalues
 
 
-@MicroWebSrv.route('/sensordata')
-def _httpHandlerSensorDataGet(httpClient, httpResponse):
+@MicroWebSrv.route('/start')
+def _httpHandlerFileGet(httpClient, httpResponse):
+    gc.mem_free()
+    print("Main Rocket subroutine starting")
+    rocket_main()
+    gc.mem_free()
     httpResponse.WriteResponseOk(
         headers=({
             'Cache-Control': 'no-cache'
         }),
         contentType='text/event-stream',
         contentCharset='UTF-8',
-        content='data: {0}\n\n'.format(str(datavalues())))
+        content='data: {0}'.format(str(getDataValues())))
+
+@MicroWebSrv.route('/download.csv')
+def _httpHandlerFileGet(httpClient, httpResponse):
+    gc.mem_free()
+    httpResponse.WriteResponseOk(
+        headers=({
+            'Cache-Control': 'no-cache'
+        }),
+        contentType='text/event-stream',
+        contentCharset='UTF-8',
+        content='data: {0}'.format(str(data.csv)))
+
+
+@MicroWebSrv.route('/sensordata')
+def _httpHandlerSensorDataGet(httpClient, httpResponse):
+    gc.mem_free()
+    httpResponse.WriteResponseOk(
+        headers=({
+            'Cache-Control': 'no-cache'
+        }),
+        contentType='text/event-stream',
+        contentCharset='UTF-8',
+        content='data: {0}\n\n'.format(str(getDataValues())))
 
 
 def _acceptWebSocketCallback(webSocket, httpClient):
@@ -107,8 +152,6 @@ def httpserver_init():
 def gps_init():
     global gps
     gps = neo6mgps.NEO6MGPS(baudrate=9600)
-    gps.update()
-    gps.interpret_rmc()
 
 
 def mpu9250_init():
@@ -119,12 +162,6 @@ def mpu9250_init():
     sensor.calibrate_MPU9250()
 
 
-def calculate_acceleration():
-    x_acceleration = float(sensor.acceleration[0])
-    y_acceleration = float(sensor.acceleration[1])
-    z_acceleration = float(sensor.acceleration[2])
-
-
 def bme_init():
     global i2c_bme280
     global bme
@@ -132,11 +169,39 @@ def bme_init():
     bme = bme280.BME280(i2c=i2c_bme280)
 
 
+def datavalues_init():
+    global data
+    data = DATAVALUES()
+    data.altitude = bme.getAltitude_ft()
+
+
 def auto_connect_wifi(SSID, Password):
+    global wlan
+    wlan = network.WLAN(network.STA_IF)
     if (not wlan.isconnected()):
         print('connecting to network...')
         wlan.active(True)
         wlan.connect(SSID, Password)
-        while not wlan.isconnected():
-            pass
+        for i in range(0, 3):
+            if(not wlan.isconnected()):
+                utime.sleep(1)
+                pass
+            else:
+                break
     print('network config:', wlan.ifconfig())
+
+
+class DATAVALUES(object):
+    def __init__(self):
+        self.altitude = 0.0
+        self.delta_altitude = 0.0
+        self.max_delta_altitude = 0.0
+        self.x_acceleration = 0.0
+        self.max_x_acceleration = 0.0
+        self.y_acceleration = 0.0
+        self.max_y_acceleration = 0.0
+        self.z_acceleration = 0.0
+        self.max_z_acceleration = 0.0
+        self.pressure = 0.0
+        self.csv = []
+        self.launched = False
