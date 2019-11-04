@@ -3,6 +3,9 @@ import esp
 import webrepl
 import network
 
+SSID = ""
+Password = ""
+
 try:
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
